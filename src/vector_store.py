@@ -2,7 +2,9 @@
 向量数据库模块
 """
 import uuid
-from typing import List, Dict, Optional, Any
+import jieba
+import jieba.analyse
+from typing import List, Dict, Optional, Any, Tuple
 import logging
 from qdrant_client import QdrantClient
 from qdrant_client.http import models
@@ -206,4 +208,107 @@ class QdrantManager:
             return True
         except Exception as e:
             logger.error(f"数据库连接失败: {e}")
-            return False 
+            return False
+
+    def extract_keywords(self, text: str) -> List[str]:
+        """提取文本关键词"""
+        try:
+            # 使用jieba提取关键词，增加人名识别
+            keywords = jieba.analyse.extract_tags(text, topK=5, withWeight=False)
+            
+            # 添加完整人名作为关键词
+            words = jieba.lcut(text)
+            for word in words:
+                if len(word) >= 2 and any(c in word for c in ['程', '李', '张', '王', '刘', '陈', '杨', '黄', '赵', '周']):
+                    if word not in keywords:
+                        keywords.append(word)
+            
+            logger.debug(f"提取的关键词: {keywords}")
+            return keywords
+        except Exception as e:
+            logger.error(f"关键词提取失败: {e}")
+            return []
+
+    def calculate_keyword_score(self, query_keywords: List[str], text: str) -> float:
+        """计算关键词匹配分数"""
+        try:
+            if not query_keywords:
+                return 0.0
+            
+            # 计算每个关键词在文本中的出现次数
+            text_keywords = jieba.analyse.extract_tags(text, topK=20)
+            
+            # 添加完整人名匹配
+            words = jieba.lcut(text)
+            for word in words:
+                if len(word) >= 2 and any(c in word for c in ['程', '李', '张', '王', '刘', '陈', '杨', '黄', '赵', '周']):
+                    if word not in text_keywords:
+                        text_keywords.append(word)
+            
+            # 计算匹配分数
+            matches = 0
+            for kw in query_keywords:
+                # 完全匹配
+                if kw in text_keywords:
+                    matches += 1
+                # 部分匹配（对于人名）
+                elif len(kw) >= 2 and any(kw in tk for tk in text_keywords):
+                    matches += 0.5
+            
+            # 归一化分数
+            return min(matches / len(query_keywords), 1.0)
+        except Exception as e:
+            logger.error(f"关键词分数计算失败: {e}")
+            return 0.0
+
+    def hybrid_search(self, query: str, query_vector: List[float], top_k: int = 5,
+                     score_threshold: float = 0.05, keyword_weight: float = 0.3,
+                     vector_weight: float = 0.7) -> List[Dict]:
+        """混合检索（向量相似度 + 关键词匹配）"""
+        try:
+            logger.debug(f"开始混合检索，top_k: {top_k}")
+            
+            # 提取查询关键词
+            query_keywords = self.extract_keywords(query)
+            logger.debug(f"提取的关键词: {query_keywords}")
+            
+            # 向量相似度检索
+            vector_results = self.client.search(
+                collection_name=self.collection_name,
+                query_vector=query_vector,
+                limit=top_k * 3,  # 获取更多结果用于混合排序
+                score_threshold=score_threshold,
+                with_payload=True
+            )
+            
+            # 计算混合分数
+            hybrid_results = []
+            for point in vector_results:
+                text = point.payload.get("text", "")
+                vector_score = point.score
+                keyword_score = self.calculate_keyword_score(query_keywords, text)
+                
+                # 计算混合分数
+                hybrid_score = (vector_score * vector_weight + 
+                              keyword_score * keyword_weight)
+                
+                result = {
+                    "id": point.id,
+                    "hybrid_score": hybrid_score,
+                    "vector_score": vector_score,
+                    "keyword_score": keyword_score,
+                    "text": text,
+                    "metadata": {k: v for k, v in point.payload.items() if k != "text"}
+                }
+                hybrid_results.append(result)
+            
+            # 按混合分数排序并返回top_k个结果
+            hybrid_results.sort(key=lambda x: x["hybrid_score"], reverse=True)
+            final_results = hybrid_results[:top_k]
+            
+            logger.debug(f"混合检索完成，返回 {len(final_results)} 个结果")
+            return final_results
+            
+        except Exception as e:
+            logger.error(f"混合检索失败: {e}")
+            return [] 

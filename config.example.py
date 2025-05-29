@@ -22,8 +22,11 @@ CHUNK_SIZE = 800  # 文本块大小
 CHUNK_OVERLAP = 100  # 文本块重叠大小
 
 # 检索配置
-TOP_K = 3  # 检索返回的相似文档数量
+TOP_K = 5  # 检索返回的相似文档数量
 SCORE_THRESHOLD = 0.1  # 相似度阈值
+KEYWORD_WEIGHT = 0.3  # 关键词匹配权重
+VECTOR_WEIGHT = 0.7  # 向量相似度权重
+MAX_CONTEXT_LENGTH = 2000  # 最大上下文长度
 
 # 生成配置
 MAX_TOKENS = 1000  # 最大生成长度

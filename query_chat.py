@@ -108,11 +108,14 @@ class RAGChatBot:
             # 将查询向量化
             query_vector = self.embedding_manager.embed_query(query)
             
-            # 搜索相似文档
-            results = self.vector_store.similarity_search(
+            # 使用混合检索
+            results = self.vector_store.hybrid_search(
+                query=query,
                 query_vector=query_vector,
                 top_k=config.TOP_K,
-                score_threshold=0.1
+                score_threshold=config.SCORE_THRESHOLD,
+                keyword_weight=config.KEYWORD_WEIGHT,
+                vector_weight=config.VECTOR_WEIGHT
             )
             
             return results
@@ -154,13 +157,18 @@ class RAGChatBot:
         console.print(f"\n找到 {len(results)} 个相关文档片段：")
         
         for i, result in enumerate(results, 1):
-            score = result.get("score", 0)
+            hybrid_score = result.get("hybrid_score", 0)
+            vector_score = result.get("vector_score", 0)
+            keyword_score = result.get("keyword_score", 0)
             text = result.get("text", "")
             
             # 限制显示长度
             display_text = text[:200] + "..." if len(text) > 200 else text
             
-            panel_content = f"相似度: {score:.3f}\n\n{display_text}"
+            panel_content = f"混合分数: {hybrid_score:.3f}\n"
+            panel_content += f"向量相似度: {vector_score:.3f}\n"
+            panel_content += f"关键词匹配: {keyword_score:.3f}\n\n"
+            panel_content += display_text
             
             if show_details:
                 metadata = result.get("metadata", {})

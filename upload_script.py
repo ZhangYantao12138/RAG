@@ -63,10 +63,7 @@ def main():
             init_task = progress.add_task("初始化系统组件...", total=None)
             
             # 初始化文档处理器
-            doc_processor = DocumentProcessor(
-                chunk_size=config.CHUNK_SIZE,
-                chunk_overlap=config.CHUNK_OVERLAP
-            )
+            doc_processor = DocumentProcessor()
             
             # 初始化向量化管理器
             embedding_manager = EmbeddingManager(

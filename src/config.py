@@ -50,7 +50,15 @@ class Config:
         # 处理参数
         self.CHUNK_SIZE = getattr(config_module, 'CHUNK_SIZE', 800)
         self.CHUNK_OVERLAP = getattr(config_module, 'CHUNK_OVERLAP', 100)
-        self.TOP_K = getattr(config_module, 'TOP_K', 3)
+        
+        # 检索配置
+        self.TOP_K = getattr(config_module, 'TOP_K', 5)
+        self.SCORE_THRESHOLD = getattr(config_module, 'SCORE_THRESHOLD', 0.1)
+        self.KEYWORD_WEIGHT = getattr(config_module, 'KEYWORD_WEIGHT', 0.3)
+        self.VECTOR_WEIGHT = getattr(config_module, 'VECTOR_WEIGHT', 0.7)
+        self.MAX_CONTEXT_LENGTH = getattr(config_module, 'MAX_CONTEXT_LENGTH', 2000)
+        
+        # 生成配置
         self.MAX_TOKENS = getattr(config_module, 'MAX_TOKENS', 1000)
         self.TEMPERATURE = getattr(config_module, 'TEMPERATURE', 0.7)
         
@@ -84,7 +92,15 @@ class Config:
         # 处理参数
         self.CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', '800'))
         self.CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', '100'))
-        self.TOP_K = int(os.getenv('TOP_K', '3'))
+        
+        # 检索配置
+        self.TOP_K = int(os.getenv('TOP_K', '5'))
+        self.SCORE_THRESHOLD = float(os.getenv('SCORE_THRESHOLD', '0.1'))
+        self.KEYWORD_WEIGHT = float(os.getenv('KEYWORD_WEIGHT', '0.3'))
+        self.VECTOR_WEIGHT = float(os.getenv('VECTOR_WEIGHT', '0.7'))
+        self.MAX_CONTEXT_LENGTH = int(os.getenv('MAX_CONTEXT_LENGTH', '2000'))
+        
+        # 生成配置
         self.MAX_TOKENS = int(os.getenv('MAX_TOKENS', '1000'))
         self.TEMPERATURE = float(os.getenv('TEMPERATURE', '0.7'))
         
@@ -95,15 +111,15 @@ class Config:
     def validate(self) -> bool:
         """验证配置是否完整"""
         required_fields = [
-            'OPENAI_API_KEY',      # 用于嵌入模型
-            'DEEPSEEK_API_KEY',    # 用于聊天模型  
-            'QDRANT_URL', 
+            'DEEPSEEK_API_KEY',
+            'QDRANT_URL',
             'QDRANT_API_KEY'
         ]
         
         for field in required_fields:
-            if not getattr(self, field):
+            if not getattr(self, field, None):
                 return False
+        
         return True
     
     def get_script_path(self) -> str:
