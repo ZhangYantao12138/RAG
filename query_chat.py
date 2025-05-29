@@ -118,6 +118,12 @@ class RAGChatBot:
                 vector_weight=config.VECTOR_WEIGHT
             )
             
+            # 调试：打印chunk_id=1的分数
+            for r in results:
+                cid = r.get("metadata", {}).get("chunk_id", None)
+                if cid == 1:
+                    console.print(f"[调试] chunk_id=1 混合分数: {r.get('hybrid_score'):.3f} 向量分数: {r.get('vector_score'):.3f} 关键词分数: {r.get('keyword_score'):.3f}")
+
             return results
             
         except Exception as e:
@@ -161,11 +167,13 @@ class RAGChatBot:
             vector_score = result.get("vector_score", 0)
             keyword_score = result.get("keyword_score", 0)
             text = result.get("text", "")
+            chunk_id = result.get("metadata", {}).get("chunk_id", "N/A")
             
             # 限制显示长度
             display_text = text[:200] + "..." if len(text) > 200 else text
             
-            panel_content = f"混合分数: {hybrid_score:.3f}\n"
+            panel_content = f"chunk_id: {chunk_id}\n"
+            panel_content += f"混合分数: {hybrid_score:.3f}\n"
             panel_content += f"向量相似度: {vector_score:.3f}\n"
             panel_content += f"关键词匹配: {keyword_score:.3f}\n\n"
             panel_content += display_text
@@ -282,7 +290,7 @@ class RAGChatBot:
             border_style="green"
         ))
         
-        show_context = False
+        show_context = True
         
         try:
             while True:

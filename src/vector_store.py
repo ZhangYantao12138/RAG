@@ -210,21 +210,108 @@ class QdrantManager:
             logger.error(f"数据库连接失败: {e}")
             return False
 
+    def get_document_by_id(self, chunk_id: int) -> Optional[Dict]:
+        """根据chunk_id获取文档"""
+        try:
+            # 使用scroll方法获取所有点
+            scroll_result = self.client.scroll(
+                collection_name=self.collection_name,
+                limit=10000,  # 获取足够多的点
+                with_payload=True,
+                with_vectors=True
+            )
+            
+            # 查找匹配的文档
+            for point in scroll_result[0]:
+                if point.payload.get("chunk_id") == chunk_id:
+                    return {
+                        "id": point.id,
+                        "text": point.payload.get("text", ""),
+                        "vector": point.vector,
+                        "metadata": {k: v for k, v in point.payload.items() if k != "text"}
+                    }
+            
+            return None
+            
+        except Exception as e:
+            logger.error(f"获取文档失败: {e}")
+            return None
+
+    def calculate_vector_similarity(self, vector1: List[float], vector2: List[float]) -> float:
+        """计算两个向量的余弦相似度"""
+        try:
+            import numpy as np
+            
+            # 转换为numpy数组
+            v1 = np.array(vector1)
+            v2 = np.array(vector2)
+            
+            # 计算余弦相似度
+            dot_product = np.dot(v1, v2)
+            norm1 = np.linalg.norm(v1)
+            norm2 = np.linalg.norm(v2)
+            
+            if norm1 == 0 or norm2 == 0:
+                return 0.0
+                
+            similarity = dot_product / (norm1 * norm2)
+            return float(similarity)
+            
+        except Exception as e:
+            logger.error(f"计算向量相似度失败: {e}")
+            return 0.0
+
     def extract_keywords(self, text: str) -> List[str]:
         """提取文本关键词"""
         try:
-            # 使用jieba提取关键词，增加人名识别
-            keywords = jieba.analyse.extract_tags(text, topK=5, withWeight=False)
+            keywords = set()  # 使用集合避免重复
             
-            # 添加完整人名作为关键词
+            # 1. 使用jieba的TF-IDF提取关键词
+            tfidf_keywords = jieba.analyse.extract_tags(text, topK=10, withWeight=False)
+            keywords.update(tfidf_keywords)
+            
+            # 2. 使用jieba的TextRank提取关键词（可能包含不同的重要词）
+            textrank_keywords = jieba.analyse.textrank(text, topK=10, withWeight=False)
+            keywords.update(textrank_keywords)
+            
+            # 3. 分词并识别各类实体
             words = jieba.lcut(text)
             for word in words:
-                if len(word) >= 2 and any(c in word for c in ['程', '李', '张', '王', '刘', '陈', '杨', '黄', '赵', '周']):
-                    if word not in keywords:
-                        keywords.append(word)
+                # 人名识别（2字及以上）
+                if len(word) >= 2 and any(c in word for c in ['程', '李', '张', '王', '刘', '陈', '杨', '黄', '赵', '周', '吴', '郑', '孙', '马', '朱', '胡', '林', '郭', '何', '高']):
+                    keywords.add(word)
+                
+                # 地点识别（包含特定词）
+                if any(c in word for c in ['市', '区', '县', '镇', '村', '路', '街', '巷', '楼', '院', '园', '馆', '店', '厂', '站', '场']):
+                    keywords.add(word)
+                
+                # 时间识别
+                if any(c in word for c in ['年', '月', '日', '时', '分', '秒', '天', '周', '星期', '早上', '中午', '下午', '晚上', '凌晨']):
+                    keywords.add(word)
+                
+                # 数字+单位组合
+                if any(c in word for c in ['个', '只', '条', '张', '本', '台', '辆', '次', '回', '遍', '趟', '顿', '场', '阵']):
+                    keywords.add(word)
+                
+                # 重要动作/状态词（2字及以上）
+                if len(word) >= 2 and any(c in word for c in ['说', '想', '看', '做', '走', '跑', '跳', '唱', '哭', '笑', '吃', '喝', '睡', '醒', '死', '活']):
+                    keywords.add(word)
+            
+            # 4. 添加完整的数字
+            import re
+            numbers = re.findall(r'\d+', text)
+            keywords.update(numbers)
+            
+            # 5. 添加完整的英文单词
+            english_words = re.findall(r'[a-zA-Z]+', text)
+            keywords.update(english_words)
+            
+            # 转换为列表并过滤掉太短的词
+            keywords = [k for k in keywords if len(k) >= 2 or k.isdigit()]
             
             logger.debug(f"提取的关键词: {keywords}")
-            return keywords
+            return list(keywords)
+            
         except Exception as e:
             logger.error(f"关键词提取失败: {e}")
             return []
@@ -235,15 +322,8 @@ class QdrantManager:
             if not query_keywords:
                 return 0.0
             
-            # 计算每个关键词在文本中的出现次数
-            text_keywords = jieba.analyse.extract_tags(text, topK=20)
-            
-            # 添加完整人名匹配
-            words = jieba.lcut(text)
-            for word in words:
-                if len(word) >= 2 and any(c in word for c in ['程', '李', '张', '王', '刘', '陈', '杨', '黄', '赵', '周']):
-                    if word not in text_keywords:
-                        text_keywords.append(word)
+            # 提取文本中的所有关键词
+            text_keywords = set(self.extract_keywords(text))
             
             # 计算匹配分数
             matches = 0
@@ -251,12 +331,26 @@ class QdrantManager:
                 # 完全匹配
                 if kw in text_keywords:
                     matches += 1
-                # 部分匹配（对于人名）
-                elif len(kw) >= 2 and any(kw in tk for tk in text_keywords):
-                    matches += 0.5
+                # 部分匹配（对于较长的词）
+                elif len(kw) >= 3:
+                    # 检查是否包含在文本关键词中
+                    for tk in text_keywords:
+                        if kw in tk or tk in kw:
+                            matches += 0.5
+                            break
+                
+                # 数字匹配（允许相近数字）
+                if kw.isdigit():
+                    for tk in text_keywords:
+                        if tk.isdigit():
+                            diff = abs(int(kw) - int(tk))
+                            if diff <= 1:  # 允许误差为1
+                                matches += 0.8
+                                break
             
             # 归一化分数
             return min(matches / len(query_keywords), 1.0)
+            
         except Exception as e:
             logger.error(f"关键词分数计算失败: {e}")
             return 0.0
@@ -266,18 +360,15 @@ class QdrantManager:
                      vector_weight: float = 0.7) -> List[Dict]:
         """混合检索（向量相似度 + 关键词匹配）"""
         try:
-            logger.debug(f"开始混合检索，top_k: {top_k}")
-            
             # 提取查询关键词
             query_keywords = self.extract_keywords(query)
-            logger.debug(f"提取的关键词: {query_keywords}")
             
             # 向量相似度检索
             vector_results = self.client.search(
                 collection_name=self.collection_name,
                 query_vector=query_vector,
-                limit=top_k * 3,  # 获取更多结果用于混合排序
-                score_threshold=score_threshold,
+                limit=1000,  # 获取足够多的结果用于混合排序
+                score_threshold=0.0,  # 先不过滤，等计算完混合分数再过滤
                 with_payload=True
             )
             
@@ -302,11 +393,15 @@ class QdrantManager:
                 }
                 hybrid_results.append(result)
             
-            # 按混合分数排序并返回top_k个结果
+            # 按混合分数排序
             hybrid_results.sort(key=lambda x: x["hybrid_score"], reverse=True)
-            final_results = hybrid_results[:top_k]
             
-            logger.debug(f"混合检索完成，返回 {len(final_results)} 个结果")
+            # 过滤低分结果
+            filtered_results = [r for r in hybrid_results if r["hybrid_score"] >= score_threshold]
+            
+            # 返回top_k个结果
+            final_results = filtered_results[:top_k]
+            
             return final_results
             
         except Exception as e:

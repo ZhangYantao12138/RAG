@@ -58,7 +58,7 @@ def main():
         # 获取所有点
         points = client.scroll(
             collection_name=config.COLLECTION_NAME,
-            limit=100,  # 每次获取100个点
+            limit=250,  # 每次获取100个点
             with_payload=True,
             with_vectors=True
         )[0]  # scroll返回(records, next_page_offset)
